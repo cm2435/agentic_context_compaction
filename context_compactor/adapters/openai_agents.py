@@ -7,7 +7,7 @@ Requires: pip install context-compactor[openai-agents]
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from agents.agent import Agent
 from agents.items import RunItem, TResponseInputItem
@@ -73,7 +73,9 @@ class CompactionRunHooks(RunHooks[TContext]):
         or implementing custom run logic.
         """
         # Log compaction check (the hook doesn't support modifying input_items)
-        current_tokens = self.compactor.token_counter.count_messages(input_items)
+        # Cast is safe: TResponseInputItem is part of OpenAIAgentsMessage union
+        messages = cast(list[OpenAIAgentsMessage], input_items)
+        current_tokens = self.compactor.token_counter.count_messages(messages)
         if self.compactor.verbose and current_tokens > self.compactor.trigger_threshold:
             print(
                 f"[Compactor] Warning: Input exceeds threshold "

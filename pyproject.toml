@@ -51,9 +51,10 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
-[tool.pyright]
-pythonVersion = "3.11"
-typeCheckingMode = "basic"
-reportMissingImports = "warning"  # Optional deps may not be installed
-reportInvalidTypeForm = "none"  # We use runtime type aliases intentionally
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.ty.rules]
+# Optional dependencies may not be installed
+unresolved-import = "ignore"
 

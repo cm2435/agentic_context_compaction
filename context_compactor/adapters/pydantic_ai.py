@@ -64,17 +64,21 @@ def pydantic_ai_adapter(
         ]
 
         # Run async compaction synchronously
+        coro = compactor.maybe_compact(typed_messages)
         try:
             asyncio.get_running_loop()
             # Already in async context - schedule in thread pool
             import concurrent.futures
 
+            def run_coro() -> list[PydanticAIMessage]:
+                return asyncio.run(coro)
+
             with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, compactor.maybe_compact(typed_messages))
+                future = pool.submit(run_coro)
                 compacted = future.result()
         except RuntimeError:
             # No running loop - can use asyncio.run directly
-            compacted = asyncio.run(compactor.maybe_compact(typed_messages))
+            compacted = asyncio.run(coro)
 
         return compacted  # type: ignore
 
