@@ -1,10 +1,41 @@
 [project]
-name = "context-compactor"
-version = "0.2.0"
+name = "agentic-context-compaction"
+version = "0.1.0"
 description = "Automatic context window management for AI agent SDKs"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "Charlie Masters", email = "charlie.masters@deepflow.com" }
+]
+keywords = [
+    "ai",
+    "agents",
+    "context",
+    "compaction",
+    "llm",
+    "pydantic-ai",
+    "openai",
+    "claude",
+    "anthropic",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 dependencies = []  # Core has no required deps
+
+[project.urls]
+Homepage = "https://github.com/cm2435/agentic_context_compaction"
+Repository = "https://github.com/cm2435/agentic_context_compaction"
+Issues = "https://github.com/cm2435/agentic_context_compaction/issues"
 
 [project.optional-dependencies]
 # SDK adapters
