@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
 
+from .hooks import CompactionHook, CompactionResult
 from .protocols import CompactionStrategy, TokenCounter
 
 MessageT = TypeVar("MessageT")
@@ -28,24 +29,27 @@ class ContextCompactor(Generic[MessageT]):
         strategy: CompactionStrategy to use for compacting messages
         token_counter: TokenCounter for estimating token counts
         verbose: Print debug information during compaction
+        hooks: List of CompactionHook instances to notify on compaction events
 
     Example:
         ```python
         from context_compactor import ContextCompactor
         from context_compactor.tokenizers.pydantic_ai import PydanticAITokenCounter
         from context_compactor.strategies.pydantic_ai import SummarizeMiddle
+        from context_compactor.hooks import LoggingHook
 
         compactor: ContextCompactor[PydanticAIMessage] = ContextCompactor(
             max_context_tokens=128_000,
             trigger_at_percent=0.8,
             strategy=SummarizeMiddle(keep_first=2, keep_last=5),
             token_counter=PydanticAITokenCounter(model="gpt-4o"),
+            hooks=[LoggingHook()],
         )
 
         # Use with pydantic-ai
         agent = Agent(
             'openai:gpt-4o',
-            history_processors=[compactor.as_history_processor()],
+            history_processors=[pydantic_ai_adapter(compactor)],
         )
         ```
     """
@@ -55,6 +59,7 @@ class ContextCompactor(Generic[MessageT]):
     token_counter: TokenCounter[MessageT]
     trigger_at_percent: float = 0.8
     verbose: bool = False
+    hooks: list[CompactionHook] = field(default_factory=list)
 
     # Statistics (not init params)
     compactions_performed: int = field(default=0, init=False)
@@ -68,6 +73,11 @@ class ContextCompactor(Generic[MessageT]):
     async def maybe_compact(self, messages: list[MessageT]) -> list[MessageT]:
         """
         Compact messages if over threshold, otherwise return unchanged.
+
+        If compaction is triggered, all registered hooks are notified:
+        1. `hook.on_start()` is called for each hook before compaction
+        2. Compaction is performed using the configured strategy
+        3. `hook.on_end(result)` is called for each hook after compaction
 
         Args:
             messages: List of native SDK messages
@@ -91,6 +101,10 @@ class ContextCompactor(Generic[MessageT]):
             pct = self.trigger_at_percent * 100
             print(f"[Compactor] Threshold exceeded ({pct:.0f}%), compacting...")
 
+        # Fire all start hooks
+        for hook in self.hooks:
+            await hook.on_start()
+
         # Target 50% of max to leave room for new content
         target_tokens = int(self.max_context_tokens * 0.5)
 
@@ -105,6 +119,20 @@ class ContextCompactor(Generic[MessageT]):
         # Update stats
         self.compactions_performed += 1
         self.tokens_saved += current_tokens - new_tokens
+
+        # Build result for hooks
+        result = CompactionResult(
+            original_tokens=current_tokens,
+            compacted_tokens=new_tokens,
+            tokens_saved=current_tokens - new_tokens,
+            original_message_count=len(messages),
+            compacted_message_count=len(compacted),
+            strategy_name=type(self.strategy).__name__,
+        )
+
+        # Fire all end hooks
+        for hook in self.hooks:
+            await hook.on_end(result)
 
         if self.verbose:
             reduction = (1 - new_tokens / current_tokens) * 100

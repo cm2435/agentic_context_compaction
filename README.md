@@ -13,6 +13,7 @@ This library provides automatic, intelligent context compaction with:
 - **Generic & Type-Safe** — Works with native SDK message types
 - **Multiple strategies** — From simple truncation to LLM summarization
 - **SDK adapters** — pydantic-ai, openai-agents, claude-agent-sdk
+- **Lifecycle hooks** — UI feedback during compaction (spinners, progress)
 
 ## Installation
 
@@ -33,7 +34,7 @@ pip install context-compactor[all-sdks]
 
 ```python
 from pydantic_ai import Agent
-from context_compactor import ContextCompactor
+from context_compactor import ContextCompactor, LoggingHook
 from context_compactor.adapters.pydantic_ai import pydantic_ai_adapter
 from context_compactor.strategies import KeepRecentMessages
 from context_compactor.tokenizers.pydantic_ai import PydanticAITokenCounter
@@ -42,6 +43,7 @@ compactor = ContextCompactor(
     max_context_tokens=128_000,
     strategy=KeepRecentMessages(keep_count=20),
     token_counter=PydanticAITokenCounter(),
+    hooks=[LoggingHook()],  # Optional: log compaction events
 )
 
 agent = Agent(
@@ -97,6 +99,87 @@ async with ClaudeSDKClient(options=options) as client:
     await client.query("Help me with this large codebase...")
 ```
 
+## Lifecycle Hooks
+
+Hooks let you react to compaction events—perfect for showing UI feedback like Cursor's "Summarizing conversation..." spinner.
+
+### Built-in Hooks
+
+```python
+from context_compactor import LoggingHook, CallbackHook
+
+# LoggingHook - prints to stdout
+compactor = ContextCompactor(
+    ...,
+    hooks=[LoggingHook(prefix="[MyApp]")],
+)
+
+# CallbackHook - call your own async functions
+async def on_start():
+    await show_spinner("Summarizing context...")
+
+async def on_end(result):
+    await hide_spinner()
+    print(f"Saved {result.tokens_saved} tokens")
+
+compactor = ContextCompactor(
+    ...,
+    hooks=[CallbackHook(on_start_callback=on_start, on_end_callback=on_end)],
+)
+```
+
+### Custom Hooks
+
+Implement the `CompactionHook` protocol:
+
+```python
+from dataclasses import dataclass
+from context_compactor import CompactionResult
+
+@dataclass
+class WebhookHook:
+    """Send compaction events to your backend."""
+    webhook_url: str
+    
+    async def on_start(self) -> None:
+        async with httpx.AsyncClient() as client:
+            await client.post(self.webhook_url, json={
+                "type": "compaction_started",
+                "message": "Summarizing context..."
+            })
+    
+    async def on_end(self, result: CompactionResult) -> None:
+        async with httpx.AsyncClient() as client:
+            await client.post(self.webhook_url, json={
+                "type": "compaction_completed",
+                "tokens_saved": result.tokens_saved,
+            })
+
+# Use multiple hooks
+compactor = ContextCompactor(
+    max_context_tokens=128_000,
+    strategy=KeepRecentMessages(keep_count=20),
+    token_counter=PydanticAITokenCounter(),
+    hooks=[
+        WebhookHook(webhook_url="https://your-app.com/events"),
+        LoggingHook(),
+    ],
+)
+```
+
+### Event Order
+
+Hooks fire synchronously before/after compaction, ensuring correct ordering with streaming:
+
+```
+1. User sends message
+2. history_processor runs
+   → hook.on_start() fires → UI shows spinner
+   → compaction happens
+   → hook.on_end() fires → UI hides spinner
+3. Stream begins → tokens flow to UI
+```
+
 ## Compaction Strategies
 
 | Strategy | Description | Best For |
@@ -138,7 +221,7 @@ See the [`examples/`](examples/) directory for complete working examples:
 
 | SDK | Examples |
 |-----|----------|
-| pydantic-ai | [keep_recent](examples/pydantic_ai_keep_recent.py), [keep_first_last](examples/pydantic_ai_keep_first_last.py), [sliding_window](examples/pydantic_ai_sliding_window.py), [summarize_middle](examples/pydantic_ai_summarize_middle.py) |
+| pydantic-ai | [keep_recent](examples/pydantic_ai_keep_recent.py), [keep_first_last](examples/pydantic_ai_keep_first_last.py), [sliding_window](examples/pydantic_ai_sliding_window.py), [summarize_middle](examples/pydantic_ai_summarize_middle.py), [streaming_hooks](examples/pydantic_ai_streaming_hooks.py) |
 | openai-agents | [keep_recent](examples/openai_agents_keep_recent.py), [sliding_window](examples/openai_agents_sliding_window.py) |
 | claude-agent-sdk | [keep_recent](examples/claude_agent_keep_recent.py) |
 
@@ -153,6 +236,7 @@ ContextCompactor(
     token_counter: TokenCounter,       # How to count tokens
     trigger_at_percent: float = 0.8,   # Compact at 80% full
     verbose: bool = False,             # Print debug info
+    hooks: list[CompactionHook] = [],  # Lifecycle hooks
 )
 ```
 
@@ -161,6 +245,21 @@ ContextCompactor(
 - `await compactor.maybe_compact(messages)` — Compact if over threshold
 - `compactor.get_stats()` — Get compaction statistics
 - `compactor.reset_stats()` — Reset statistics
+
+### `CompactionResult`
+
+Passed to `hook.on_end()`:
+
+```python
+@dataclass
+class CompactionResult:
+    original_tokens: int        # Tokens before compaction
+    compacted_tokens: int       # Tokens after compaction
+    tokens_saved: int           # original - compacted
+    original_message_count: int
+    compacted_message_count: int
+    strategy_name: str          # e.g., "KeepRecentMessages"
+```
 
 ## Development
 
@@ -175,6 +274,9 @@ pytest tests/ -v
 
 # Lint
 ruff check .
+
+# Type check
+ty check context_compactor/
 ```
 
 ## License
